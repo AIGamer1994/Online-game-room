@@ -1,0 +1,297 @@
+
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>多人遊戲大廳</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Arial, sans-serif;
+      color: #f4f5ff;
+      background: linear-gradient(135deg, #15172f, #292653);
+      padding: 30px 16px;
+    }
+
+    .container {
+      max-width: 680px;
+      margin: auto;
+    }
+
+    h1 { text-align: center; margin-bottom: 8px; }
+    .subtitle { text-align: center; color: #b9bddb; }
+
+    .panel {
+      background: #222442;
+      border: 1px solid #41456c;
+      border-radius: 16px;
+      padding: 22px;
+      margin-top: 20px;
+    }
+
+    h2 { margin-top: 0; font-size: 20px; }
+
+    input, button {
+      width: 100%;
+      padding: 13px;
+      border-radius: 9px;
+      font-size: 16px;
+      margin-top: 10px;
+    }
+
+    input {
+      border: 1px solid #666b91;
+      background: #15172f;
+      color: white;
+    }
+
+    button {
+      border: none;
+      background: #8175ff;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button:hover { background: #6c5ee8; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+
+    .secondary { background: #414568; }
+    .hidden { display: none; }
+    .notice { color: #c3c7e8; line-height: 1.6; }
+    .room-code { font-size: 30px; font-weight: bold; letter-spacing: 5px; }
+    .player {
+      padding: 12px;
+      margin-top: 9px;
+      background: #303353;
+      border-radius: 8px;
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    #message { min-height: 24px; color: #c7f7d2; }
+    #gameBoard { font-size: 18px; line-height: 1.8; }
+    .tag { color: #b8f4ca; }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <h1>🎮 多人遊戲大廳</h1>
+    <p class="subtitle">建立房間，與朋友一起玩遊戲</p>
+
+    <section class="panel">
+      <h2>👤 玩家暱稱</h2>
+      <input id="nickname" maxlength="16"
+        placeholder="輸入你的暱稱，例如：玩家小明">
+      <p class="notice">先設定暱稱，再建立或加入房間。</p>
+    </section>
+
+    <section class="panel" id="home">
+      <h2>🏠 遊戲大廳</h2>
+      <button id="createBtn">建立新房間</button>
+      <hr style="border-color:#41456c; margin:22px 0">
+      <h2>🚪 加入房間</h2>
+      <input id="roomInput" maxlength="6"
+        placeholder="輸入 6 位房間代碼">
+      <button id="joinBtn" class="secondary">加入房間</button>
+      <p class="notice">
+        目前是本機測試版。真正的跨電腦連線將在下一階段加入。
+      </p>
+    </section>
+
+    <section class="panel hidden" id="lobby">
+      <h2>🎲 房間大廳</h2>
+      <p>房間代碼</p>
+      <div class="room-code" id="roomCode"></div>
+      <button id="copyBtn" class="secondary">複製房間代碼</button>
+      <p class="notice" id="roomInfo"></p>
+
+      <h2>玩家名單</h2>
+      <div id="players"></div>
+
+      <button id="readyBtn">準備好了</button>
+      <button id="startBtn">開始遊戲（房主）</button>
+      <button id="leaveBtn" class="secondary">返回大廳</button>
+    </section>
+
+    <section class="panel hidden" id="game">
+      <h2>♟️ 回合制遊戲測試</h2>
+      <div id="gameBoard"></div>
+      <button id="actionBtn">進行我的回合</button>
+      <button id="backBtn" class="secondary">返回房間</button>
+    </section>
+
+    <p id="message" role="status"></p>
+  </main>
+
+  <script>
+    const $ = id => document.getElementById(id);
+
+    let room = null;
+    let playerId = Math.random().toString(36).slice(2, 9);
+    let isReady = false;
+    let turn = 1;
+    let actions = 0;
+
+    function name() {
+      return $("nickname").value.trim();
+    }
+
+    function tell(text) {
+      $("message").textContent = text;
+    }
+
+    function show(id) {
+      ["home", "lobby", "game"].forEach(section => {
+        $(section).classList.toggle("hidden", section !== id);
+      });
+    }
+
+    function renderPlayers() {
+      $("players").innerHTML = "";
+
+      room.players.forEach(player => {
+        const item = document.createElement("div");
+        item.className = "player";
+
+        const label = document.createElement("span");
+        label.textContent = player.name +
+          (player.id === room.host ? " 👑 房主" : "");
+
+        const status = document.createElement("span");
+        status.className = "tag";
+        status.textContent = player.ready ? "已準備" : "未準備";
+
+        item.append(label, status);
+        $("players").appendChild(item);
+      });
+
+      $("roomInfo").textContent =
+        `玩家：${room.players.length}/10 · ` +
+        (room.started ? "遊戲進行中" : "等待開始");
+
+      $("startBtn").disabled =
+        room.host !== playerId ||
+        room.players.length < 2 ||
+        !room.players.every(p => p.ready);
+
+      $("readyBtn").textContent =
+        isReady ? "取消準備" : "準備好了";
+    }
+
+    function enterRoom(newRoom) {
+      room = newRoom;
+      isReady = false;
+      $("roomCode").textContent = room.code;
+      show("lobby");
+      renderPlayers();
+      tell("成功進入房間！");
+    }
+
+    function makeCode() {
+      return Math.random().toString(36).slice(2, 8).toUpperCase();
+    }
+
+    $("createBtn").onclick = () => {
+      if (!name()) {
+        tell("請先輸入玩家暱稱。");
+        $("nickname").focus();
+        return;
+      }
+
+      const code = makeCode();
+      enterRoom({
+        code,
+        host: playerId,
+        started: false,
+        players: [{ id: playerId, name: name(), ready: false }]
+      });
+
+      tell("房間已建立！目前只儲存在這個瀏覽器。");
+    };
+
+    $("joinBtn").onclick = () => {
+      if (!name()) {
+        tell("請先輸入玩家暱稱。");
+        return;
+      }
+
+      const code = $("roomInput").value.trim().toUpperCase();
+      tell("此版本尚未連接多人伺服器，無法透過代碼加入其他裝置的房間。請先測試建立房間。");
+
+      if (!code) $("roomInput").focus();
+    };
+
+    $("readyBtn").onclick = () => {
+      if (!room || room.started) return;
+      isReady = !isReady;
+      room.players.find(p => p.id === playerId).ready = isReady;
+      renderPlayers();
+      tell(isReady ? "你已準備好！" : "你取消了準備。");
+    };
+
+    $("startBtn").onclick = () => {
+      if (!room || room.host !== playerId) return;
+      if (room.players.length < 2) {
+        tell("至少需要 2 位玩家才能開始。");
+        return;
+      }
+
+      if (!room.players.every(p => p.ready)) {
+        tell("請等待所有玩家準備好。");
+        return;
+      }
+
+      room.started = true;
+      turn = 1;
+      actions = 0;
+      renderGame();
+      show("game");
+      tell("遊戲開始！");
+    };
+
+    function renderGame() {
+      $("gameBoard").textContent =
+        `目前回合：${turn}<br>本機測試行動次數：${actions}`;
+
+      $("gameBoard").innerHTML =
+        `<p>目前回合：${turn}</p>` +
+        `<p>本機測試行動次數：${actions}</p>` +
+        `<p>房間：${room.code}</p>`;
+    }
+
+    $("actionBtn").onclick = () => {
+      actions++;
+      turn++;
+      renderGame();
+      tell("已完成一次測試行動！");
+    };
+
+    $("backBtn").onclick = () => {
+      show("lobby");
+      renderPlayers();
+    };
+
+    $("leaveBtn").onclick = () => {
+      room = null;
+      isReady = false;
+      show("home");
+      tell("已返回大廳。");
+    };
+
+    $("copyBtn").onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(room.code);
+        tell("房間代碼已複製。");
+      } catch {
+        tell("你的房間代碼是：" + room.code);
+      }
+    };
+  </script>
+</body>
+</html>
